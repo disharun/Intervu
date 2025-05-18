@@ -39,9 +39,6 @@ function Feedback({ params }) {
         <h2 className="text-lg text-red-500">No feedback available</h2>
       ) : null}
 
-      <h2 className="text-lg my-3 text-blue-300">
-        Your overall rating <strong>7/10</strong>
-      </h2>
       <h2 className="text-sm text-gray-500">
         Find below interview question with correct Answer, your answer and
         feedback for improvement

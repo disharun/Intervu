@@ -11,7 +11,7 @@ import {
 } from "../../../components/ui/dialog";
 import { Input } from "../../../components/ui/input";
 import { Textarea } from "../../../components/ui/textarea";
-import { chatSession } from "../../../utils/GeminiAi";
+import { generateQuestions } from "../../../utils/GeminiAi";
 import { LoaderCircle } from "lucide-react";
 import { db } from "../../../utils/db";
 import { Mk } from "../../../utils/schema";
@@ -19,36 +19,45 @@ import { v4 as uuidv4 } from "uuid";
 import { useUser } from "@clerk/nextjs";
 import moment from "moment";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 function AddNewInterview() {
   const [openDialog, setOpenDialog] = useState(false);
-  const [jobRole, setJobRole] = useState();
-  const [jobDescription, setJobDescription] = useState();
-  const [yearsOfExperience, setYearsOfExperience] = useState();
+  const [jobRole, setJobRole] = useState("");
+  const [jobDescription, setJobDescription] = useState("");
+  const [yearsOfExperience, setYearsOfExperience] = useState("");
   const [loading, setLoading] = useState(false);
-  const [jsonResponse, setJsonResponse] = useState([]);
   const router = useRouter();
   const { user } = useUser();
 
   const handleSubmit = async (event) => {
-    setLoading(true);
-    event.preventDefault();
-    console.log(jobRole, jobDescription, yearsOfExperience);
-    const InputPrompt = `Job Role: ${jobRole} \n Job Description: ${jobDescription} \n Years of Experience: ${yearsOfExperience} Depending on the job role , job description and years of experience, give us ${process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_NUMBER} interview questions that can be asked in the interview in JSON format.Give me question and answer pairs for the interview as field in JSON format. `;
-    const result = await chatSession.sendMessage(InputPrompt);
-    const Jsonform = result.response
-      .text()
-      .replace("```json", "")
-      .replace("```", "");
-    console.log(JSON.parse(Jsonform));
-    setJsonResponse(Jsonform);
+    try {
+      setLoading(true);
+      event.preventDefault();
 
-    if (Jsonform) {
+      // Generate questions using the optimized function
+      const questionsData = await generateQuestions(
+        jobRole,
+        jobDescription,
+        yearsOfExperience,
+        process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_NUMBER || 5
+      );
+
+      console.log("Generated questions:", questionsData);
+
+      if (
+        !questionsData.interviewQuestions ||
+        questionsData.interviewQuestions.length === 0
+      ) {
+        throw new Error("No questions were generated. Please try again.");
+      }
+
+      // Save to database
       const resp = await db
         .insert(Mk)
         .values({
           mockId: uuidv4(),
-          jsonMockResp: Jsonform,
+          jsonMockResp: JSON.stringify(questionsData),
           jobPosition: jobRole,
           jobDesc: jobDescription,
           jobExp: yearsOfExperience,
@@ -56,16 +65,20 @@ function AddNewInterview() {
           createdAt: moment().format("DD-MM-YYYY"),
         })
         .returning({ mockId: Mk.mockId });
-      console.log("Inserted DB", resp);
-      if (resp) {
-        setOpenDialog(false);
-        router.push(`/dashboard/Interview/` + resp[0]?.mockId);
-      }
-    } else {
-      console.log("ERROR");
-    }
 
-    setLoading(false);
+      if (!resp?.[0]?.mockId) {
+        throw new Error("Failed to save interview");
+      }
+
+      setOpenDialog(false);
+      toast.success("Interview created successfully!");
+      router.push(`/dashboard/Interview/${resp[0].mockId}`);
+    } catch (error) {
+      console.error("Error creating interview:", error);
+      toast.error(error.message || "Failed to create interview");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -74,9 +87,9 @@ function AddNewInterview() {
         className="p-10 border rounded-lg bg-secondary hover:scale-105 transition-all cursor-pointer hover:shadow-md"
         onClick={() => setOpenDialog(true)}
       >
-        <h2 className=" text-lg text-center">+ Add New</h2>
+        <h2 className="text-lg text-center">+ Add New</h2>
       </div>
-      <Dialog open={openDialog}>
+      <Dialog open={openDialog} onOpenChange={setOpenDialog}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="font-bold text-2xl">
@@ -87,35 +100,43 @@ function AddNewInterview() {
               years of experience
             </DialogDescription>
           </DialogHeader>
-          <form action="onSubmit" onSubmit={handleSubmit}>
-            <div className="mt-7 my-3">
-              <label>Job role/job Position </label>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Job role/job Position
+              </label>
               <Input
-                placeholder="Enter Job Role"
+                placeholder="e.g. Senior React Developer"
                 required
+                value={jobRole}
                 onChange={(event) => setJobRole(event.target.value)}
               />
             </div>
-            <div className="my-3">
-              <label>Job Description/Tech stack </label>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Job Description/Tech stack
+              </label>
               <Textarea
-                placeholder="Enter Job desc"
+                placeholder="e.g. React, Next.js, TypeScript, Node.js"
                 required
+                value={jobDescription}
                 onChange={(event) => setJobDescription(event.target.value)}
               />
             </div>
-            <div className="my-3">
-              <label>Years of experience </label>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Years of experience</label>
               <Input
-                placeholder="5"
                 type="number"
+                placeholder="5"
+                min="0"
                 max="50"
                 required
+                value={yearsOfExperience}
                 onChange={(event) => setYearsOfExperience(event.target.value)}
               />
             </div>
 
-            <div className="flex gap-5 justify-end">
+            <div className="flex gap-5 justify-end pt-4">
               <Button
                 type="button"
                 variant="ghost"
@@ -125,10 +146,10 @@ function AddNewInterview() {
               </Button>
               <Button type="submit" disabled={loading}>
                 {loading ? (
-                  <>
+                  <div className="flex items-center gap-2">
                     <LoaderCircle className="animate-spin" />
-                    'Generating from AI'
-                  </>
+                    <span>Generating questions...</span>
+                  </div>
                 ) : (
                   "Start Interview"
                 )}

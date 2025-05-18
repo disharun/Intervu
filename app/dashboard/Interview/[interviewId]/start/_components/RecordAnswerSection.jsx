@@ -4,7 +4,7 @@ import Image from "next/image";
 import React, { useEffect, useState } from "react";
 import Webcam from "react-webcam";
 import useSpeechToText from "react-hook-speech-to-text";
-import { StopCircle } from "lucide-react";
+import { Loader2, Mic, StopCircle } from "lucide-react";
 import { toast } from "sonner";
 import { chatSession } from "../../../../../../utils/GeminiAi";
 import { db } from "../../../../../../utils/db";
@@ -73,80 +73,98 @@ function RecordAnswerSection({
       ",depend on question and user answer for given interview questions" +
       "please give us rating for answer and feedback on area of improvement if any is there" +
       "in just 3 to 5 line to improve it in a only in JSON format with rating field and feedback field";
-    const result = await chatSession.sendMessage(feedbackPrompt);
-    const responseText = await result.response.text();
-    const jsonMockResp = responseText
-      .replace("```json", "")
-      .replace("```", "")
-      .trim();
-    console.log(jsonMockResp);
 
-    let Jsonfeedbackresp;
     try {
-      Jsonfeedbackresp = JSON.parse(jsonMockResp);
-    } catch (error) {
-      console.error("Failed to parse JSON response:", error);
-      toast("Failed to parse feedback response");
-      setLoading(false);
-      return;
-    }
+      const responseText = await chatSession.sendMessage(feedbackPrompt);
+      console.log("Raw feedback response:", responseText);
 
-    const resp = await db.insert(userAnswerSchema).values({
-      mockIdRef: interviewDetails.mockId,
-      question: mockinterViewQuestions[activeQuestionIndex]?.question,
-      correctanswer: mockinterViewQuestions[activeQuestionIndex]?.answer,
-      useranswer: userAnswer,
-      feedback: Jsonfeedbackresp?.feedback,
-      rating: Jsonfeedbackresp?.rating,
-      userEmail: user?.primaryEmailAddress?.emailAddress,
-      createdAt: moment().format("YYYY-MM-DD HH:mm:ss"),
-    });
+      // Clean the response text
+      const jsonMockResp = responseText
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
 
-    if (resp) {
-      toast("success");
-      setUserAnswer("");
+      console.log("Cleaned feedback response:", jsonMockResp);
+
+      let Jsonfeedbackresp;
+      try {
+        Jsonfeedbackresp = JSON.parse(jsonMockResp);
+      } catch (error) {
+        console.error("Failed to parse JSON response:", error);
+        toast.error("Failed to parse feedback response");
+        setLoading(false);
+        return;
+      }
+
+      const resp = await db.insert(userAnswerSchema).values({
+        mockIdRef: interviewDetails.mockId,
+        question: mockinterViewQuestions[activeQuestionIndex]?.question,
+        correctanswer: mockinterViewQuestions[activeQuestionIndex]?.answer,
+        useranswer: userAnswer,
+        feedback: Jsonfeedbackresp?.feedback,
+        rating: Jsonfeedbackresp?.rating,
+        userEmail: user?.primaryEmailAddress?.emailAddress,
+        createdAt: moment().format("YYYY-MM-DD HH:mm:ss"),
+      });
+
+      if (resp) {
+        toast.success("Answer recorded successfully");
+        setUserAnswer("");
+        setResults([]);
+      }
       setResults([]);
+    } catch (error) {
+      console.error("Error processing feedback:", error);
+      toast.error("Failed to process feedback");
+    } finally {
+      setLoading(false);
     }
-    setResults([]);
-
-    setLoading(false);
   };
 
   return (
-    <div>
-      <div className="flex flex-col justify-center items-center bg-white border rounded-lg shadow-lg p-5 relative">
-        <Image
-          src="/webcam.png"
-          alt="Webcam"
-          width={150}
-          height={150}
-          className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 opacity-100"
-        />
-        <Webcam
-          mirrored={true}
-          style={{
-            height: 300,
-            width: "100%",
-            zIndex: 10,
-          }}
-        />
+    <div className="space-y-6">
+      <div className="relative overflow-hidden rounded-xl border bg-background shadow-lg transition-all">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-blue-500/20 opacity-50" />
+        <div className="relative p-6">
+          <div className="aspect-video overflow-hidden rounded-lg bg-black/10 dark:bg-white/10">
+            <Webcam mirrored={true} className="h-full w-full object-cover" />
+          </div>
+        </div>
       </div>
 
-      <Button
-        disabled={loading}
-        variant="outline"
-        className="my-10 justify-center items-center w-full bg-primary text-white"
-        onClick={SaveUserAnswer}
-      >
-        {isRecording ? (
-          <h2 className="text-red-600 animate-pulse flex gap-2 items-center justify-center">
-            <StopCircle />
-            Stop Recording
-          </h2>
-        ) : (
-          <h2>Record Answer</h2>
+      <div className="space-y-4">
+        {userAnswer && (
+          <div className="rounded-lg border bg-card p-4">
+            <h3 className="mb-2 font-semibold">Your Answer:</h3>
+            <p className="text-sm text-card-foreground">{userAnswer}</p>
+          </div>
         )}
-      </Button>
+
+        <Button
+          disabled={loading}
+          variant={isRecording ? "destructive" : "default"}
+          size="lg"
+          className="w-full transition-all hover:scale-[1.02]"
+          onClick={SaveUserAnswer}
+        >
+          {loading ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Processing...</span>
+            </div>
+          ) : isRecording ? (
+            <div className="flex items-center gap-2">
+              <StopCircle className="h-4 w-4" />
+              <span>Stop Recording</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Mic className="h-4 w-4" />
+              <span>Start Recording</span>
+            </div>
+          )}
+        </Button>
+      </div>
     </div>
   );
 }
